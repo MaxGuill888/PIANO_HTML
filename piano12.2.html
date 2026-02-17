@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Studio Piano - Instruments Universels</title>
+    <style>
+        :root { --bg: #0d0d0f; --panel: #1a1a20; --accent-1: #00d2ff; --accent-2: #ff9f43; }
+        * { box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', sans-serif; background-color: var(--bg); color: white;
+            margin: 0; padding: 10px; height: 100vh; display: flex; flex-direction: column; overflow: hidden;
+        }
+        .master-controls {
+            display: flex; gap: 15px; background: var(--panel); padding: 10px;
+            border-radius: 8px; margin-bottom: 10px; align-items: center; justify-content: center; flex-shrink: 0;
+        }
+        button { padding: 8px 15px; border-radius: 4px; border: none; cursor: pointer; font-weight: bold; background: #333; color: white; font-size: 13px; }
+        .btn-rec.active { background: #ff4757; animation: pulse 1s infinite; }
+        .btn-play.active { background: #2ed573; color: #1a1a1a; }
+        .deck-container { display: flex; flex-direction: column; gap: 10px; flex-grow: 1; }
+        .piano-deck {
+            background: #000; padding: 10px; border-radius: 10px; border: 1px solid #333;
+            display: flex; flex-direction: column; flex: 1; min-height: 0;
+        }
+        .deck-1 { border-left: 5px solid var(--accent-1); }
+        .deck-2 { border-left: 5px solid var(--accent-2); }
+        .deck-header { display: flex; justify-content: flex-end; margin-bottom: 5px; flex-shrink: 0; }
+        select { background: #2a2a35; color: white; border: 1px solid #444; padding: 3px; border-radius: 4px; font-size: 12px; width: 120px; }
+        .piano-keys { display: flex; justify-content: center; flex-grow: 1; min-height: 0; position: relative; }
+        .key { position: relative; cursor: pointer; flex: 1; max-width: 60px; display: flex; justify-content: center; }
+        .white {
+            height: 100%; width: 100%; background: #eee; border: 1px solid #999; border-radius: 0 0 4px 4px;
+            z-index: 1; display: flex; flex-direction: column; justify-content: flex-end; align-items: center;
+            padding-bottom: 5px; color: #333; font-weight: bold; font-size: 12px;
+        }
+        .black {
+            height: 60%; width: 34px; background: #222; margin-left: -17px; margin-right: -17px; z-index: 2;
+            border-radius: 0 0 2px 2px; border: 1px solid black; display: flex; flex-direction: column;
+            justify-content: flex-end; align-items: center; padding-bottom: 5px; color: white; font-size: 10px;
+        }
+        .deck-1 .key.active { background: var(--accent-1) !important; }
+        .deck-2 .key.active { background: var(--accent-2) !important; }
+        
+        .sustain-active { color: var(--accent-1); text-shadow: 0 0 5px var(--accent-1); }
+
+        .slider-container {
+            display: flex; align-items: center; gap: 10px; background: rgba(255,255,255,0.05);
+            padding: 5px 10px; border-radius: 5px; margin-top: 5px; flex-shrink: 0;
+        }
+        input[type=range] { flex-grow: 1; height: 4px; cursor: pointer; }
+        .slider-container span { font-size: 11px; font-weight: bold; min-width: 90px; }
+        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
+    </style>
+</head>
+<body>
+
+    <div class="master-controls">
+        <button id="recBtn" class="btn-rec" onclick="toggleRecord()">🔴 ENREGISTRER</button>
+        <button id="playBtn" class="btn-play" onclick="toggleLoop()" disabled>▶ BOUCLER</button>
+        <button onclick="clearLoop()">🗑 EFFACER</button>
+        
+        <div style="display: flex; gap: 15px; padding-left: 10px; border-left: 1px solid #444;">
+            <label style="font-size: 11px; font-weight: bold; cursor: pointer; display: flex; align-items: center; gap: 5px;">
+                <input type="checkbox" id="chordMode"> ACCORDS
+            </label>
+            <label id="sustainLabel" style="font-size: 11px; font-weight: bold; cursor: pointer; display: flex; align-items: center; gap: 5px;">
+                <input type="checkbox" id="sustainMode"> SUSTAIN (SHIFT)
+            </label>
+        </div>
+    </div>
+
+    <div class="deck-container">
+        <div class="piano-deck deck-1">
+            <div class="deck-header">
+                <select id="inst1" class="inst-select"></select>
+            </div>
+            <div class="piano-keys" id="piano1"></div>
+            <div class="slider-container">
+                <span>DÉBUT : <b id="val1">Do4</b></span>
+                <input type="range" min="12" max="84" value="60" oninput="updateRoot(1, this.value)">
+            </div>
+        </div>
+
+        <div class="piano-deck deck-2">
+            <div class="deck-header">
+                <select id="inst2" class="inst-select"></select>
+            </div>
+            <div class="piano-keys" id="piano2"></div>
+            <div class="slider-container">
+                <span>DÉBUT : <b id="val2">Do3</b></span>
+                <input type="range" min="12" max="84" value="48" oninput="updateRoot(2, this.value)">
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const noteNamesFR = ['Do', 'Do#', 'Ré', 'Ré#', 'Mi', 'Fa', 'Fa#', 'Sol', 'Sol#', 'La', 'La#', 'Si'];
+        
+        // Liste unique d'instruments pour tous les claviers
+        const instruments = [
+            { id: 'piano', name: 'Piano' },
+            { id: 'electric', name: 'Électrique' },
+            { id: 'organ', name: 'Orgue' },
+            { id: '8bit', name: '8-Bit' },
+            { id: 'bass', name: 'Basse' },
+            { id: 'pad', name: 'Nappe' }
+        ];
+
+        const keysHaut = ['q','2','w','3','e','r','5','t','6','y','7','u','i'];
+        const keysBas = ['z','s','x','d','c','v','g','b','h','n','j','m',','];
+
+        let deckRoots = { 1: 60, 2: 48 };
+        let isRecording = false, isLooping = false, recordedEvents = [], startTime, loopDuration, loopInterval;
+        let shiftKeyDown = false;
+
+        // Remplir les menus déroulants
+        function populateSelectors() {
+            document.querySelectorAll('.inst-select').forEach((select, idx) => {
+                instruments.forEach(inst => {
+                    const opt = document.createElement('option');
+                    opt.value = inst.id;
+                    opt.innerText = inst.name;
+                    select.appendChild(opt);
+                });
+                // Valeurs par défaut différentes pour le fun
+                select.value = idx === 0 ? 'piano' : 'electric';
+            });
+        }
+
+        function getNoteInfo(midiNum) {
+            return { name: noteNamesFR[midiNum % 12], oct: Math.floor(midiNum / 12) - 1 };
+        }
+
+        function initDeck(deckNum) {
+            const container = document.getElementById(`piano${deckNum}`);
+            container.innerHTML = '';
+            const root = deckRoots[deckNum];
+            const keys = deckNum === 1 ? keysHaut : keysBas;
+
+            keys.forEach((keyChar, index) => {
+                const midi = root + index;
+                const info = getNoteInfo(midi);
+                const isBlack = info.name.includes('#');
+                
+                const div = document.createElement('div');
+                div.className = `key ${isBlack ? 'black' : 'white'}`;
+                div.id = `key-${deckNum}-${keyChar}`;
+                div.innerHTML = `<b>${keyChar.toUpperCase()}</b>`;
+                div.onmousedown = () => playNote(midi, deckNum);
+                container.appendChild(div);
+            });
+            
+            const rootInfo = getNoteInfo(root);
+            document.getElementById(`val${deckNum}`).innerText = rootInfo.name + rootInfo.oct;
+        }
+
+        function updateRoot(deckNum, value) {
+            deckRoots[deckNum] = parseInt(value);
+            initDeck(deckNum);
+        }
+
+        function playNote(midi, deckNum, save = true) {
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+            const inst = document.getElementById(`inst${deckNum}`).value;
+            const freq = 440 * Math.pow(2, (midi - 69) / 12);
+            
+            const isSustainActive = document.getElementById('sustainMode').checked || shiftKeyDown;
+            const releaseTime = isSustainActive ? 3.5 : 0.8; 
+
+            synth(freq, inst, releaseTime);
+
+            const keys = deckNum === 1 ? keysHaut : keysBas;
+            const root = deckRoots[deckNum];
+            const keyIdx = midi - root;
+            
+            if (keyIdx >= 0 && keyIdx < keys.length) {
+                const el = document.getElementById(`key-${deckNum}-${keys[keyIdx]}`);
+                if (el) { el.classList.add('active'); setTimeout(() => el.classList.remove('active'), 120); }
+            }
+
+            if (isRecording && save) recordedEvents.push({ midi, deckNum, time: Date.now() - startTime });
+            
+            if (document.getElementById('chordMode').checked && save) {
+                playNote(midi + 4, deckNum, false);
+                playNote(midi + 7, deckNum, false);
+            }
+        }
+
+        function synth(freq, type, release) {
+            const osc = audioCtx.createOscillator(), g = audioCtx.createGain(), now = audioCtx.currentTime;
+            
+            // Logique de synthèse identique pour les deux decks
+            if(type === '8bit') osc.type = 'square';
+            else if(type === 'organ' || type === 'bass') osc.type = 'sawtooth';
+            else osc.type = 'sine';
+
+            g.gain.setValueAtTime(0, now);
+            g.gain.linearRampToValueAtTime(0.2, now + 0.02);
+            
+            const finalRelease = type === 'pad' ? release + 1.5 : release;
+            
+            g.gain.exponentialRampToValueAtTime(0.001, now + finalRelease);
+            osc.frequency.setValueAtTime(freq, now);
+            osc.connect(g); g.connect(audioCtx.destination);
+            osc.start(); osc.stop(now + finalRelease + 0.1);
+        }
+
+        function toggleRecord() {
+            isRecording = !isRecording;
+            const btn = document.getElementById('recBtn');
+            if (isRecording) { recordedEvents = []; startTime = Date.now(); btn.classList.add('active'); btn.innerText = "⏹ ARRÊTER"; } 
+            else { loopDuration = Date.now() - startTime; btn.classList.remove('active'); btn.innerText = "🔴 ENREGISTRER"; document.getElementById('playBtn').disabled = false; }
+        }
+
+        function toggleLoop() {
+            isLooping = !isLooping;
+            const btn = document.getElementById('playBtn');
+            if (isLooping) {
+                btn.classList.add('active'); btn.innerText = "⏸ PAUSE";
+                const run = () => recordedEvents.forEach(e => setTimeout(() => { if (isLooping) playNote(e.midi, e.deckNum, false); }, e.time));
+                run(); loopInterval = setInterval(run, loopDuration);
+            } else { clearInterval(loopInterval); btn.classList.remove('active'); btn.innerText = "▶ BOUCLER"; }
+        }
+
+        function clearLoop() { recordedEvents = []; isLooping = false; clearInterval(loopInterval); document.getElementById('playBtn').disabled = true; }
+
+        window.addEventListener('keydown', (e) => {
+            if (e.key === 'Shift') {
+                shiftKeyDown = true;
+                document.getElementById('sustainLabel').classList.add('sustain-active');
+                return;
+            }
+            if (e.repeat) return;
+            if (e.code === 'Space') { e.preventDefault(); toggleRecord(); return; }
+            if (e.code === 'Enter') { e.preventDefault(); toggleLoop(); return; }
+            
+            const key = e.key.toLowerCase();
+            const idx1 = keysHaut.indexOf(key);
+            if (idx1 !== -1) playNote(deckRoots[1] + idx1, 1);
+            const idx2 = keysBas.indexOf(key);
+            if (idx2 !== -1) playNote(deckRoots[2] + idx2, 2);
+        });
+
+        window.addEventListener('keyup', (e) => {
+            if (e.key === 'Shift') {
+                shiftKeyDown = false;
+                document.getElementById('sustainLabel').classList.remove('sustain-active');
+            }
+        });
+
+        populateSelectors();
+        initDeck(1);
+        initDeck(2);
+    </script>
+</body>
+</html>
